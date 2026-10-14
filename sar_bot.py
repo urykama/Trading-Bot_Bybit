@@ -41,14 +41,16 @@ api = API_Bybit()
 
 # ========== КЛАСС ТОРГОВОГО БОТА ДЛЯ ОДНОЙ ПАРЫ ==========
 class SARTrader:
-    def __init__(self, pair, position_side, entry_price, position_amt, qty_step, min_order_qty):
+
+    def __init__(self, pair, qty_step, min_order_qty):
 
         self.pair = pair
+        self.qty_step = qty_step
+        self.min_order_qty = min_order_qty
         self.base_usdt = BASE_USDT
-        self.position_side = 1 if position_side == 'LONG' else -1
-        self.entry_price = entry_price
-        self.position_amt = position_amt
-        self.position_size = 1.0
+        self.position_amt = None
+        self.position_ep = None
+        self.position_side = None
         self.last_loss = False
         self.trigger_order_id = None
         self.trigger_price = 0
@@ -56,10 +58,8 @@ class SARTrader:
         self.pending_trigger = False
         self.entry_direction = None
         self.side = None
-        self.qty_step = qty_step
-        self.min_order_qty = min_order_qty
 
-        print(f"  Трейдер создан для {pair}: позиция {position_side}, объём {self.position_amt}, цена {entry_price}")
+        print(f"  Трейдер создан для {pair}: шаг количества {qty_step}, минимальный размер ордера {min_order_qty}")
 
     def get_base_quantity(self, price):
         """Возвращает базовое количество монет на self.base_usdt"""
@@ -72,7 +72,7 @@ class SARTrader:
         if new_position != self.position_side:
             print(f"  [{self.pair}] Позиция изменилась на бирже: {self.position_side} -> {new_position}")
             self.position_side = new_position
-            self.entry_price = position['entry_price']
+            self.position_ep = position['entry_price']
             self.position_amt = position['positionAmt']
             # Сбрасываем триггер
             self.trigger_order_id = None
@@ -183,7 +183,6 @@ class SARTrader:
 
         # 8. Если нужно обновить — ставим новый триггер
         if need_update:
-            # quantity = abs(self.position_amt) + self.get_base_quantity(current_price) * self.position_size
             quantity = abs(self.position_amt) + self.base_usdt / best_price
             # quantity = 0.008
             print(quantity, "\t=\t", self.base_usdt, "\t/\t", best_price)
@@ -234,9 +233,6 @@ def sync_traders(traders, open_positions, restrictions):
         if pair not in traders:
             traders[pair] = SARTrader(
                 pair,
-                pos_data['side'],  # сторона позиции (long/short)
-                pos_data['entry_price'],  # цена входа
-                pos_data['positionAmt'],  # объём позиции
                 restrictions[pair]["qtyStep"],
                 restrictions[pair]["minOrderQty"],  # ограничения размера лота (qtyStep, minOrderQty)
             )
