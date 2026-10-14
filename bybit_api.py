@@ -7,11 +7,12 @@ import time
 import requests
 import pandas as pd
 
-
 API_KEY = "lUMI4W5C40tmOFY0DS"
 SECRET_KEY = "1bLR5sLZlAMZN968ISdr0fJWb0Smw4sMPzjU"
 RECV_WINDOW = "5000"
 BASE_URL = "https://api-demo.bybit.com"
+
+
 # BASE_URL = "http://127.0.0.1:8000"
 
 
@@ -41,17 +42,19 @@ class API_Bybit:
         bot не используется — оставлен для совместимости сигнатуры.
         Возвращает orderId или None.
         """
+        print(pair, side, trigger_price, quantity)
         try:
             body = {
                 "category": "linear",
                 "symbol": pair,
-                "side": side,                        # "Buy" / "Sell"
+                "side": side,  # "Buy" / "Sell"
                 "orderType": "Market",
                 "qty": str(quantity),
                 "triggerPrice": str(trigger_price),
                 "triggerBy": "MarkPrice",
                 "triggerDirection": 1 if side == "Buy" else 2,
-                "positionIdx": 0,                    # One-Way Mode
+                # "triggerDirection": 2,
+                "positionIdx": 0,  # One-Way Mode
                 "timeInForce": "GTC",
             }
             payload = json.dumps(body)
