@@ -13,7 +13,7 @@ from sar_strategy import (
 from bybit_api import API_Bybit
 
 # ========== НАСТРОЙКИ ==========
-BASE_USDT = 1000  # Базовый размер позиции в USDT
+BASE_USDT = 200  # Базовый размер позиции в USDT
 INTERVAL = '1h'  # Таймфрейм по умолчанию
 INTERVALS_TO_SEC = {
     '1m': 60, '3m': 180, '5m': 300, '15m': 900, '30m': 1800,
@@ -52,7 +52,6 @@ class SARTrader:
         self.last_loss = False
         self.trigger_order_id = None
         self.trigger_price = 0
-        self.current_interval_idx = -1
         self.last_trigger_price = 0
         self.pending_trigger = False
         self.entry_direction = None
@@ -60,7 +59,7 @@ class SARTrader:
         self.qty_step = qty_step
         self.min_order_qty = min_order_qty
 
-        print(f"  Трейдер создан для {pair}: позиция {self.position_side}, объём {self.position_amt}")
+        print(f"  Трейдер создан для {pair}: позиция {position_side}, объём {self.position_amt}, цена {entry_price}")
 
     def get_base_quantity(self, price):
         """Возвращает базовое количество монет на self.base_usdt"""
@@ -134,50 +133,42 @@ class SARTrader:
             return True
         return False
 
-    def process(self, df, open_position):
-        """Основная логика обработки пары"""
-        # 1. Синхронизация с биржей
-        self.sync_with_exchange(open_position)
-
+    def prepare(self, df):
         # Определяем направление разворота
-        if self.position_side == 1:  # LONG -> разворот в SHORT
+        if self.position_side == 1:
             self.entry_direction = 'SHORT'
             self.side = 'Sell'
-        elif self.position_side == -1:  # SHORT -> разворот в LONG
+        elif self.position_side == -1:
             self.entry_direction = 'LONG'
             self.side = 'Buy'
 
-        # 2. Расчёт SAR
         df = calculate_sar(df)
         df = df.dropna(subset=['sar_signed'])
         if len(df) < 2:
-            return True
+            return None
 
-        # 3. Интервалы и сигналы
         intervals = find_intervals(df)
         reversals = get_reversal_info(intervals)
         if not reversals:
-            return True
+            return None
 
-        current_price = df['close'].iloc[-1]
-        curr_idx = len(intervals) - 1
+        return {"df": df, "reversals": reversals}
 
-        # 4. Ищем актуальный разворотный сигнал (противоположный текущей позиции)
-        active_rev = None
-        for rev in reversed(reversals):
+    def decide(self, prepared):
+        # 2.1. Ищем актуальный разворотный сигнал (противоположный текущей позиции)
+        new_trigger_price = None
+        for rev in reversed(prepared['reversals']):
             if (self.position_side == 1 and rev['direction'] == 'SHORT') or \
                     (self.position_side == -1 and rev['direction'] == 'LONG'):
-                active_rev = rev
+                # 2.2 Получаем новую цену триггера из сигнала
+                new_trigger_price = rev['price']
                 break
-
-        if active_rev is None:
-            return True
-
-        # 5. Получаем новую цену триггера из сигнала
-        new_trigger_price = active_rev['price']
-
-        # 6. Выбираем лучшую цену (сравниваем с текущей, если триггер уже стоит)
+        # 2.3. Выбираем лучшую цену (сравниваем с текущей, если триггер уже стоит)
         best_price = self.get_best_trigger_price(new_trigger_price)
+        return best_price
+
+    def execute(self, best_price):
+        """Ставит/обновляет триггер по принятому решению."""
 
         # 7. Проверяем, нужно ли обновлять триггер
         need_update = False
@@ -186,30 +177,44 @@ class SARTrader:
             need_update = True
         elif self.trigger_price != best_price:
             # Цена изменилась — нужно обновить
+            self.trigger_price = best_price
             need_update = True
-            # print(f"                [{self.pair}] Цена триггера изменилась: {self.trigger_price:.2f} -> {best_price:.2f}")
+            # print(f"          [{self.pair}] Цена триггера изменилась: {self.trigger_price:.2f} -> {best_price:.2f}")
 
         # 8. Если нужно обновить — ставим новый триггер
         if need_update:
             # quantity = abs(self.position_amt) + self.get_base_quantity(current_price) * self.position_size
-            quantity = abs(self.position_amt) + self.get_base_quantity(df['sar'].iloc[-1]) * self.position_size
+            quantity = abs(self.position_amt) + self.base_usdt / best_price
             # quantity = 0.008
-            print(quantity, "\t\t", self.get_base_quantity(current_price), "\t\t", abs(self.position_amt))
+            print(quantity, "\t=\t", self.base_usdt, "\t/\t", best_price)
             # Округление qty до qtyStep и проверка minOrderQty
             quantity = max((quantity // self.qty_step) * self.qty_step, self.min_order_qty)
             n = STEPS[str(self.qty_step)]
             quantity = f"{quantity:.{n}f}"
             self.place_trigger(best_price, quantity)
-            self.current_interval_idx = curr_idx
         else:
             # Триггер уже существует с оптимальной ценой — ничего не делаем
             if self.pending_trigger:
                 pass  # можно добавить отладочный вывод при необходимости
 
+    def process(self, df, pos):
+        # 1.1. Синхронизация с биржей
+        self.sync_with_exchange(pos)
+        if not self.position_side:
+            return False
+
+        prepared = self.prepare(df)
+        if prepared is None:
+            return True
+
+        new_trigger_price = self.decide(prepared)
+        if new_trigger_price is None:
+            return True
+
+        self.execute(new_trigger_price)
         return True
 
 
-# ========== ОСНОВНОЙ ЦИКЛ ==========
 # ========== ОСНОВНОЙ ЦИКЛ ==========
 
 def sync_traders(traders, open_positions, restrictions):
