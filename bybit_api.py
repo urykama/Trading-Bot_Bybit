@@ -10,13 +10,16 @@ import pandas as pd
 API_KEY = "lUMI4W5C40tmOFY0DS"
 SECRET_KEY = "1bLR5sLZlAMZN968ISdr0fJWb0Smw4sMPzjU"
 RECV_WINDOW = "5000"
-BASE_URL = "https://api-demo.bybit.com"
+# BASE_URL = "https://api-demo.bybit.com"
+
+BASE_URL = "http://127.0.0.1:8000"
+INTERVAL_MAP = {
+    '1m': '1', '3m': '3', '5m': '5', '15m': '15', '30m': '30',
+    '1h': '60', '2h': '120', '4h': '240', '1d': 'D',
+}
 
 
-# BASE_URL = "http://127.0.0.1:8000"
-
-
-class API_Bybit:
+class ApiBybit:
     def __init__(self):
         self.api_key = API_KEY
         self.secret_key = SECRET_KEY
@@ -36,23 +39,23 @@ class API_Bybit:
             "Content-Type": "application/json",
         }
 
-    def set_trigger_order(self, pair, side, trigger_price, quantity):
+    def set_trigger_order(self, order):
         """
         Ставит триггер-ордер (Market) на Bybit V5.
         bot не используется — оставлен для совместимости сигнатуры.
         Возвращает orderId или None.
         """
-        print(pair, side, trigger_price, quantity)
         try:
             body = {
                 "category": "linear",
-                "symbol": pair,
-                "side": side,  # "Buy" / "Sell"
+                "symbol": order['symbol'],
+                "side": order['side'],  # "Buy" / "Sell"
                 "orderType": "Market",
-                "qty": str(quantity),
-                "triggerPrice": str(trigger_price),
+                "qty": str(order['qty']),
+                "triggerPrice": str(order['triggerPrice']),
                 "triggerBy": "MarkPrice",
-                "triggerDirection": 1 if side == "Buy" else 2,
+                # "triggerDirection": 1 if order['side'] == "Buy" else 2,
+                "triggerDirection": order['triggerDirection'],
                 # "triggerDirection": 2,
                 "positionIdx": 0,  # One-Way Mode
                 "timeInForce": "GTC",
@@ -68,7 +71,8 @@ class API_Bybit:
 
             if resp.get("retCode") == 0:
                 order_id = resp["result"]["orderId"]
-                print(f"  ✓ Триггер: {pair} \t{side} \t {quantity} @ {trigger_price:.6f}, ID={order_id}")
+                # print(f"  ✓ Триггер: {pair} \t{side} \t {quantity} @ {trigger_price:.6f}, ID={order_id}")
+                print(f"  ✓ resp['result'] : {resp}")
                 return order_id
             else:
                 print(f"  ✗ Ошибка: {resp}")
@@ -114,17 +118,22 @@ class API_Bybit:
 
         return positions
 
-    def fetch_klines(self, pair, interval='1h', limit=128):
+    def fetch_klines(self, pair, interval, limit=128):
         """Загружает свечи с биржи"""
+        # print(f"'interval' : {INTERVAL_MAP[interval]}, 'limit': {limit}")
         resp = requests.get(
             self.base_url + "/v5/market/kline",
-            params={"category": "linear", "symbol": pair, "interval": "60", "limit": limit},
+            params={"category": "linear", "symbol": pair, "interval": INTERVAL_MAP[interval], "limit": limit},
             timeout=10,
         ).json()
 
         raw = resp["result"]["list"]  # [[start, open, high, low, close, volume, turnover], ...]
         df = pd.DataFrame(raw, columns=["time", "open", "high", "low", "close", "volume", "turnover"]).astype(float)
-        df.sort_values("time", inplace=True)
+
+        if df['time'].iloc[0] > df['time'].iloc[-1]:
+            #     # Обратный порядок — разворачиваем
+            df = df.iloc[::-1].reset_index(drop=True)
+
         df["timestamp"] = pd.to_datetime(df["time"], unit="ms")
 
         return df

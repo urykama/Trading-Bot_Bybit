@@ -10,9 +10,14 @@ Parabolic SAR Calculator (Wilder).
   - sar_prev:  SAR перед последним разворотом
   - trend:     + восходящий, - нисходящий, число длина тренда (количество свечей)
 
+  - (не реализовано) sar_trend_start   значение SAR на первой свече нового тренда (то есть в момент разворота,
+   когда SAR пересчитывается через EP предыдущего тренда
+
 Использование:
     from sar_calculator import calculate_parabolic_sar
     sar_start, sar, ep, sar_prev, trend = calculate_parabolic_sar(df)
+
+
 
 Требования к DataFrame:
   - колонки: 'high', 'low', 'close'
@@ -21,6 +26,7 @@ Parabolic SAR Calculator (Wilder).
 
 import pandas as pd
 import numpy as np
+
 
 def calculate_parabolic_sar(df):
     """
@@ -34,6 +40,7 @@ def calculate_parabolic_sar(df):
     Returns
     -------
     sar_start : list[float]
+        меняем название на sar_before_touch
         SAR в начале свечи (до проверки касания).
     sar : list[float]
         SAR после проверки (может измениться внутри свечи).
@@ -43,18 +50,20 @@ def calculate_parabolic_sar(df):
         SAR перед последним разворотом.
     trend : list[int]
         + — восходящий, - — нисходящий, число длина тренда (количество свечей)
+
+
     """
 
     # === Стандартные параметры SAR ===
-    initial_af = 0.02       # начальный acceleration factor
-    max_af = 0.20           # максимальный AF
-    af_increment = 0.02     # шаг увеличения AF
+    initial_af = 0.02  # начальный acceleration factor
+    max_af = 0.20  # максимальный AF
+    af_increment = 0.02  # шаг увеличения AF
 
     # === Определяем начальный тренд ===
     uptrend = df['close'][0] < df['close'][1]
 
     # === Инициализация первого бара ===
-    sar_start = [df['low'][0] if uptrend else df['high'][0]]
+    sar_before_touch = [df['low'][0] if uptrend else df['high'][0]]
     sar = [df['low'][0] if uptrend else df['high'][0]]
 
     af = [initial_af]
@@ -62,7 +71,7 @@ def calculate_parabolic_sar(df):
 
     # sar_prev — SAR перед последним разворотом
     sar_prev = [sar[0]]
-
+    sar_trend_start = [sar[0]]
     # trend — направление тренда
     trend = [1 if uptrend else -1]
     trend_len = 1
@@ -70,10 +79,10 @@ def calculate_parabolic_sar(df):
     for i in range(1, len(df)):
 
         # 1. Рассчитываем SAR на текущей свече (предварительно)
-        sar_start.append(sar[i - 1] + af[i - 1] * (ep[i - 1] - sar[i - 1]))
+        sar_before_touch.append(sar[i - 1] + af[i - 1] * (ep[i - 1] - sar[i - 1]))
 
         # 2. Проверяем разворот тренда
-        if (uptrend and sar_start[i] > df['low'][i]) or (not uptrend and sar_start[i] < df['high'][i]):
+        if (uptrend and sar_before_touch[i] > df['low'][i]) or (not uptrend and sar_before_touch[i] < df['high'][i]):
 
             # Разворот
             uptrend = not uptrend
@@ -87,11 +96,12 @@ def calculate_parabolic_sar(df):
 
             # sar_prev = SAR перед разворотом
             sar_prev.append(sar[i - 1])
+            sar_trend_start.append(sar[i])
 
         else:
             trend_len += 1
             # Продолжение тренда
-            sar.append(sar_start[i])
+            sar.append(sar_before_touch[i])
 
             # Обновляем AF и EP при новом экстремуме
             if (uptrend and df['high'][i] > ep[i - 1]) or (not uptrend and df['low'][i] < ep[i - 1]):
@@ -103,23 +113,26 @@ def calculate_parabolic_sar(df):
 
             # sar_prev не меняется
             sar_prev.append(sar_prev[i - 1])
+            sar_trend_start.append(sar_trend_start[i - 1])
 
         # 3. Записываем тренд для текущей свечи
         trend.append(trend_len * (1 if uptrend else -1))
 
-    df['sar_start'] = sar_start
+    df['sar_prev'] = sar_prev
+    df['sar_trend_start'] = sar_trend_start
+    df['sar_before_touch'] = sar_before_touch
     df['sar'] = sar
     df['ep'] = ep
-    df['sar_prev'] = sar_prev
     df['trend'] = trend
     # Знак тренда: +1 / -1 (только направление, без длины)
-    df['sar_trend'] = np.sign(df['trend']).astype(int)
+    # df['sar_trend'] = np.sign(df['trend']).astype(int)
 
     # sar_signed = +/- уровень SAR (как возвращает talib.SAREXT)
-    df['sar_signed'] = df['sar'] * df['sar_trend']
-    df['sar_level']  = df['sar_signed'].abs()
+    # df['sar_signed'] = df['sar'] * df['sar_trend']
+    # df['sar_level'] = df['sar']
     return df
-    # return sar_start, sar, ep, sar_prev, trend
+    # return sar_before_touch, sar, ep, sar_prev, trend
+
 
 """
 🎯 Как использовать

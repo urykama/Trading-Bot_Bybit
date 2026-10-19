@@ -9,17 +9,18 @@ import os
 # import matplotlib.pyplot as plt
 from Parabolic_SAR import calculate_parabolic_sar
 
-def calculate_sar(df, accel=0.02, max_accel=0.2):
-    """Расчёт SAREXT"""
-    # df['sar_signed'] = talib.SAREXT(df['high'].values, df['low'].values,
-    #                                 startvalue=0, offsetonreverse=0,
-    #                                 accelerationinitlong=accel, accelerationlong=accel, accelerationmaxlong=max_accel,
-    #                                 accelerationinitshort=accel, accelerationshort=accel, accelerationmaxshort=max_accel
-    #                                 )
-    # df['sar_signed'] = pd.Series(df['sar_signed'], index=df.index)
-    # df['sar_level'] = df['sar_signed'].abs()
-    df = calculate_parabolic_sar(df)
-    return df
+
+# def calculate_sar(df, accel=0.02, max_accel=0.2):
+#     """Расчёт SAREXT"""
+#     # df['sar_signed'] = talib.SAREXT(df['high'].values, df['low'].values,
+#     #                                 startvalue=0, offsetonreverse=0,
+#     #                                 accelerationinitlong=accel, accelerationlong=accel, accelerationmaxlong=max_accel,
+#     #                                 accelerationinitshort=accel, accelerationshort=accel, accelerationmaxshort=max_accel
+#     #                                 )
+#     # df['sar_signed'] = pd.Series(df['sar_signed'], index=df.index)
+#     # df['sar_level'] = df['sar_signed'].abs()
+#     df = calculate_parabolic_sar(df)
+#     return df
 
 
 def find_intervals(df):
@@ -56,6 +57,11 @@ def get_reversal_info(intervals):
         dist_prev = abs(curr['end_sar'] - prev['end_sar'])
         use_start = dist_own < dist_prev
 
+        print(curr['start_sar'], curr['end_sar'], prev['end_sar'])
+        print(f"sar_trend_start = {curr['start_sar']} "
+              f"SAR = {curr['end_sar']}, "
+              f"sar в конце предыдущего тренда = {prev['end_sar']}")
+
         price = curr['start_sar'] if use_start else curr['end_sar']
         rev_time = curr['start_time'] if use_start else curr['end_time']  # ← добавить время
 
@@ -68,4 +74,3 @@ def get_reversal_info(intervals):
             'interval': intervals[i]
         })
     return reversals
-

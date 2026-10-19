@@ -1,0 +1,29 @@
+
+цепочка SAR - от разворота до разворота
+sar_prev - конец предыдущей цепочки SAR (с которой был разворот)
+sar[0] начало текущей цепочки sar
+sar[-1]  конец текущей цепочки sar
+
+if pos_side='Long' :
+    # текущий SAR получается должен быть снизу от цены
+    # берём последнюю точку sar или первую
+    if abs(sar[-1] - sar[0]) > abs(sar[-1] - sar_prev):
+        order_price = sar[-1]
+    else:
+        order_price = sar[0]
+
+
+
+
+
+
+
+
+
+
+
+
+1h sar<pos_ep PnL>0 pos_side=Short -> LONG (SL = SAR_ep(1h))
+
+1h sar<pos_ep PnL>0 pos_side=Short -> LONG
+

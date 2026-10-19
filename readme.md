@@ -2,5 +2,5 @@
 
 bash
 git add .
-git commit -m "что поменял"
+git commit -m "optimiza"
 git push
