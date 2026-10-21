@@ -7,7 +7,7 @@ import numpy as np
 from datetime import datetime
 import os
 # import matplotlib.pyplot as plt
-from Parabolic_SAR import calculate_parabolic_sar
+from calculator_sar import calculate_sar
 
 
 # def calculate_sar(df, accel=0.02, max_accel=0.2):
@@ -19,7 +19,7 @@ from Parabolic_SAR import calculate_parabolic_sar
 #     #                                 )
 #     # df['sar_signed'] = pd.Series(df['sar_signed'], index=df.index)
 #     # df['sar_level'] = df['sar_signed'].abs()
-#     df = calculate_parabolic_sar(df)
+#     df = calculate_sar(df)
 #     return df
 
 

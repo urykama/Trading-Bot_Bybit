@@ -6,9 +6,9 @@ from pprint import pprint
 
 import pandas as pd
 
-from Parabolic_SAR import calculate_parabolic_sar
+from calculator_sar import calculate_sar
 
-from bybit_api import ApiBybit
+from api_bybit import api_bybit
 
 # ========== НАСТРОЙКИ ==========
 BASE_USDT = 200  # Базовый размер позиции в USDT
@@ -32,7 +32,7 @@ STEPS = {
     "0.00001": 5,
 }
 
-api = ApiBybit()
+api = api_bybit()
 
 
 # ========== КЛАСС ТОРГОВОГО БОТА ДЛЯ ОДНОЙ ПАРЫ ==========
@@ -120,8 +120,8 @@ class SARTrader:
         self.position = pos
 
         df = api.fetch_klines(self.pair, INTERVAL)
-        # df = self.prepare(df)  # вычисление calculate_parabolic_sar
-        df = calculate_parabolic_sar(df)
+        # df = self.prepare(df)  # вычисление calculate_sar
+        df = calculate_sar(df)
 
         # Принятие решения (поиск цены для триггера)
         # Определяем направление для нового ордера (противоположно текущей позиции

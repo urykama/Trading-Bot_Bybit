@@ -6,14 +6,17 @@ from pprint import pprint
 
 import pandas as pd
 
-from Parabolic_SAR import calculate_parabolic_sar
+from calculator_sar import calculate_sar
+from calculator_hma import calculate_hma
 
-from bybit_api import ApiBybit
+from api_bybit import api_bybit
 
 # ========== НАСТРОЙКИ ==========
-BASE_USDT = 500  # Базовый размер позиции в USDT
-INTERVAL = '1m'  # Таймфрейм по умолчанию
-# INTERVAL = '5m'  # Таймфрейм по умолчанию
+pd.set_option('display.max_columns', None)
+pd.set_option('display.width', 1000)
+BASE_USDT = 200  # Базовый размер позиции в USDT
+# INTERVAL = '1m'  # Таймфрейм по умолчанию
+INTERVAL = '5m'  # Таймфрейм по умолчанию
 # INTERVAL = '1h'  # Таймфрейм по умолчанию
 INTERVALS_TO_SEC = {
     '1m': 60, '3m': 180, '5m': 300, '15m': 900, '30m': 1800,
@@ -32,7 +35,7 @@ STEPS = {
     "0.00001": 5,
 }
 
-api = ApiBybit()
+api = api_bybit()
 
 
 # ========== КЛАСС ТОРГОВОГО БОТА ДЛЯ ОДНОЙ ПАРЫ ==========
@@ -43,9 +46,10 @@ class SARTrader:
         self.pair = pair
         self.qty_step = qty_step
         self.min_order_qty = min_order_qty
+        self.decimal_places = STEPS[str(self.qty_step)]
         self.base_usdt = BASE_USDT
         self.position = None
-        self.trigger_order_id = None
+
         self.pnl_expected = 0
         self.pnl_total = 0
         self.order_new = {
@@ -54,6 +58,7 @@ class SARTrader:
             'triggerDirection': 0,
             'side': None,
             'qty': None,
+            'order_id': None,
         }
         self.order_cur = {
             'symbol': self.pair,
@@ -61,25 +66,30 @@ class SARTrader:
             'triggerDirection': 0,
             'side': None,
             'qty': None,
+            'order_id': None,
         }
         print(f"  Трейдер создан для {pair}: шаг количества {qty_step}, минимальный размер ордера {min_order_qty}")
 
     def place_trigger(self):
 
         # Удаляем старые триггеры
-        try:
-            api.cancel_all_orders(self.pair)
-            # print(f"  [{self.pair}] Удалены старые триггеры")
-        except Exception as e:
-            print(f"  [{self.pair}] Ошибка удаления: {e}")
+        # try:
+        #     api.cancel_all_orders(self.pair)
+        #     # print(f"  [{self.pair}] Удалены старые триггеры")
+        # except Exception as e:
+        #     print(f"  [{self.pair}] Ошибка удаления: {e}")
 
-        print(self.order_new)
-        # Ставим новый
+        print(f"             ствавим ордер: {self.order_new}")
+        # Ставим новый ордер
         order_id = api.set_trigger_order(self.order_new)
 
         if order_id:
+            print(f"             ордер удачно установлен, order_id = {order_id}")
+            resp = api.cancel_order(self.order_cur)
+            # print(f"             ордер c order_id = {self.order_cur['order_id']} deleted: {resp}")
             self.order_cur = self.order_new.copy()
-            self.trigger_order_id = order_id
+            self.order_cur['order_id'] = order_id
+
             return True
         return False
 
@@ -101,31 +111,24 @@ class SARTrader:
             best_price = df['sar_prev'].iloc[-1]
 
         self.order_new['triggerPrice'] = best_price
-
         return
 
-    def calculate_qty(self):
-        """Ставит/обновляет триггер по принятому решению."""
-        quantity = abs(self.position['positionAmt']) + self.base_usdt / self.order_new['triggerPrice']
-        print(quantity, "\t=\t", self.base_usdt, "\t/\t", self.order_new['triggerPrice'])
-        # Округление qty до qtyStep и проверка minOrderQty
+    def format_qty(self, quantity):
+        """Округление до qtyStep, проверка minOrderQty, формат строки под биржу."""
         quantity = max((quantity // self.qty_step) * self.qty_step, self.min_order_qty)
-        print(f"quantity = {quantity}")
-        n = STEPS[str(self.qty_step)]
-        # print(f"n = {n}")
-        self.order_new['qty'] = f"{quantity:.{n}f}"
+        return f"{quantity:.{self.decimal_places}f}"
 
     def calculate_pnl(self):
-        print(f"delta_price = self.order_new['triggerPrice'] - self.position['entry_price']")
+        # print(f"delta_price = self.order_new['triggerPrice'] - self.position['entry_price']")
         if self.position['side'] == 'LONG':
             delta_price = self.order_new['triggerPrice'] - self.position['entry_price']
-            print(f"{delta_price} = {self.order_new['triggerPrice']} - {self.position['entry_price']}")
+            # print(f"{delta_price} = {self.order_new['triggerPrice']} - {self.position['entry_price']}")
         else:
             delta_price = self.position['entry_price'] - self.order_new['triggerPrice']
-            print(f"{delta_price} = {self.position['entry_price']} - {self.order_new['triggerPrice']}")
+            # print(f"{delta_price} = {self.position['entry_price']} - {self.order_new['triggerPrice']}")
         self.pnl_expected = delta_price * self.position['positionAmt']
 
-        print(f"self.pnl_expected = {self.pnl_expected} \t self.pnl_total = {self.pnl_total}")
+        # print(f"self.pnl_expected = {self.pnl_expected} \t self.pnl_total = {self.pnl_total}")
         self.base_usdt = BASE_USDT - (self.pnl_total + self.pnl_expected) * 50
         if self.base_usdt < BASE_USDT:
             self.base_usdt = BASE_USDT
@@ -134,22 +137,46 @@ class SARTrader:
     def process(self, pos):
         # 1.1. Синхронизация с биржей, подготовка данных
         print(pos)
+        df = api.fetch_klines(self.pair, INTERVAL)
         if self.position != pos:
             print(f"\n\t\t\t\t\t\t  [{self.pair}] Позиция изменилась на бирже: {self.position} -> {pos}")
             self.position = pos
             self.pnl_total += self.pnl_expected
-        df = api.fetch_klines(self.pair, INTERVAL)
-        # df = self.prepare(df)  # вычисление calculate_parabolic_sar
-        df = calculate_parabolic_sar(df)
+        else:
+            dh = calculate_hma(df)
+            # print(dh)
+            print(self.position['side'], dh['hma'].iloc[-3], dh['hma'].iloc[-2], dh['hma'].iloc[-1])
+            print(self.position['side'] == 'LONG', dh['hma'].iloc[-3] < dh['hma'].iloc[-2] > dh['hma'].iloc[-1])
+            side = 'no side'
+            k = 0.8
+            # if self.position['side'] == 'Buy' and dh['hma_accel'][-3] < dh['hma_accel'][-2] > dh['hma_accel'][-1] and \
+            #         dh['close'][-2] < dh['close'][-1]:
+            if (self.position['side'] == 'LONG') and (dh['hma'].iloc[-3] < dh['hma'].iloc[-2] > dh['hma'].iloc[-1]):
+                side = 'Sell'
+            # elif self.position['side'] == 'Sell' and dh['hma_accel'][-3] > dh['hma_accel'][-2] < dh['hma_accel'][-1] and \
+            #         dh['close'][-2] > dh['close'][-1]:
+            elif (self.position['side'] == 'SHORT') and (dh['hma'].iloc[-3] > dh['hma'].iloc[-2] < dh['hma'].iloc[-1]):
+                side = 'Buy'
+            print(f" side = {side} \t side != 'no side' = {side != 'no side'}")
+            # side = 'Sell'
+            if side != 'no side':
+                qty = self.format_qty(abs(self.position['positionAmt']) * 0.382)
+                print(80 * "-", self.pair, side, qty)
+                order_id = api.place_market_order(self.pair, side, qty)
+                print(order_id)
 
+        # df = self.prepare(df)  # вычисление calculate_sar
+        df = calculate_sar(df)
         # Принятие решения (поиск цены для триггера)
         # Определяем направление для нового ордера (противоположно текущей позиции
         self.order_new['side'] = 'Sell' if self.position['side'] == 'LONG' else 'Buy'
-        # print(f"self.position['side'] = {self.position['side']} \t\t self.order_new['side'] = {self.order_new['side']}")
+        # print(f"self.position['side' ] = {self.position['side']} \t\t self.order_new['side'] = {self.order_new['side']}")
         self.calculate_price(df)
         self.calculate_pnl()
-        self.calculate_qty()
-        self.order_new['triggerDirection'] = 1 if self.order_new['triggerPrice'] > df['close'].iloc[-1] else 2
+        quantity = abs(self.position['positionAmt']) + self.base_usdt / self.order_new['triggerPrice']
+        self.order_new['qty'] = self.format_qty(quantity)
+        # self.order_new['triggerDirection'] = 1 if self.order_new['triggerPrice'] > df['close'].iloc[-1] else 2
+        self.order_new['triggerDirection'] = 2 if self.position['side'] == 'LONG' else 1
 
         # Исполнение (вычисление количества)
         # self.execute()
@@ -203,13 +230,9 @@ def build_lot_size_restrictions():
     resp = requests.get(
         "https://api-demo.bybit.com/v5/market/instruments-info",
         params={"category": "linear", "limit": 1000},
-        timeout=10,
+        timeout=30,
     ).json()
-    print(resp['result']['category'])
-    print(resp['result']['nextPageCursor'])
 
-    for text in resp['result']:
-        pprint(text)
     restrictions = {}
     # pairs = set()
     for item in resp["result"]["list"]:
@@ -235,7 +258,7 @@ def timer():
     while True:
         now = time.time()
         print(time.ctime(now), '\t след. в: ', time.ctime(now + t - now % t + 1), '\t', now % t)
-        # time.sleep(t - now % t + 0.1)
+        time.sleep(t - now % t + 0.1)
         tick(traders, restrictions)
 
 

@@ -10,7 +10,7 @@ from sar_strategy import (
     find_intervals,
     get_reversal_info,
 )
-from bybit_api import API_Bybit
+from api_bybit import api_bybit
 
 # ========== НАСТРОЙКИ ==========
 BASE_USDT = 200  # Базовый размер позиции в USDT
@@ -36,7 +36,7 @@ STEPS = {
     "0.00000001": 8,
 }
 
-api = API_Bybit()
+api = api_bybit()
 
 
 # ========== КЛАСС ТОРГОВОГО БОТА ДЛЯ ОДНОЙ ПАРЫ ==========

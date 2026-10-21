@@ -14,8 +14,8 @@ Parabolic SAR Calculator (Wilder).
    когда SAR пересчитывается через EP предыдущего тренда
 
 Использование:
-    from sar_calculator import calculate_parabolic_sar
-    sar_start, sar, ep, sar_prev, trend = calculate_parabolic_sar(df)
+    from sar_calculator import calculate_sar
+    sar_start, sar, ep, sar_prev, trend = calculate_sar(df)
 
 
 
@@ -28,7 +28,7 @@ import pandas as pd
 import numpy as np
 
 
-def calculate_parabolic_sar(df):
+def calculate_sar(df):
     """
     Parabolic SAR по Уайлдеру.
 
@@ -142,9 +142,9 @@ python
 # main.py
 
 import pandas as pd
-from sar_calculator import calculate_parabolic_sar
+from sar_calculator import calculate_sar
 
-sar_start, sar, ep, sar_prev, trend = calculate_parabolic_sar(df)
+sar_start, sar, ep, sar_prev, trend = calculate_sar(df)
 
 df['sar_start'] = sar_start
 df['sar'] = sar
