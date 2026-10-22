@@ -38,6 +38,51 @@ STEPS = {
 api = api_bybit()
 
 
+class KlineError(Exception):
+    pass
+
+
+def resp_to_df(resp):
+    """... None — если предпоследняя свеча не является последней закрытой на 'сейчас'."""
+    raw = resp["result"]["list"]
+    df = pd.DataFrame(
+        raw,
+        columns=["time", "open", "high", "low", "close", "volume", "turnover"],
+    ).astype(float)
+    df = df.drop(columns=["turnover"])
+    if df['time'].iloc[0] > df['time'].iloc[-1]:
+        df = df.iloc[::-1].reset_index(drop=True)
+
+    df = df.iloc[:-1].reset_index(drop=True)
+
+    interval_ms = INTERVALS_TO_SEC[INTERVAL] * 1000
+    now_ms = time.time() * 1000
+    new_last_start = int(df["time"].iloc[-1])
+    if not (new_last_start + interval_ms <= now_ms < new_last_start + 2 * interval_ms):
+        raise KlineError("resp_to_df: предпоследняя свеча не является последней закрытой")
+    return df
+
+
+def resp_to_df_incremental(resp):
+    """resp от api.fetch_klines -> df без незакрытой последней свечи (если она есть).
+    Не проверяет актуальность — это делает merge/continuity в load_klines_incremental."""
+    raw = resp["result"]["list"]
+    df = pd.DataFrame(
+        raw,
+        columns=["time", "open", "high", "low", "close", "volume", "turnover"],
+    ).astype(float)
+    df = df.drop(columns=["turnover"])
+    if df['time'].iloc[0] > df['time'].iloc[-1]:
+        df = df.iloc[::-1].reset_index(drop=True)
+
+    interval_ms = INTERVALS_TO_SEC[INTERVAL] * 1000
+    now_ms = time.time() * 1000
+    last_start = int(df["time"].iloc[-1])
+    if last_start + interval_ms > now_ms:
+        df = df.iloc[:-1].reset_index(drop=True)
+    return df
+
+
 # ========== КЛАСС ТОРГОВОГО БОТА ДЛЯ ОДНОЙ ПАРЫ ==========
 class SARTrader:
 
@@ -49,6 +94,7 @@ class SARTrader:
         self.decimal_places = STEPS[str(self.qty_step)]
         self.base_usdt = BASE_USDT
         self.position = None
+        self.df = None
 
         self.pnl_expected = 0
         self.pnl_total = 0
@@ -85,7 +131,8 @@ class SARTrader:
 
         if order_id:
             print(f"             ордер удачно установлен, order_id = {order_id}")
-            resp = api.cancel_order(self.order_cur)
+            if self.order_cur['side'] != None:
+                resp = api.cancel_order(self.order_cur)
             # print(f"             ордер c order_id = {self.order_cur['order_id']} deleted: {resp}")
             self.order_cur = self.order_new.copy()
             self.order_cur['order_id'] = order_id
@@ -134,10 +181,37 @@ class SARTrader:
             self.base_usdt = BASE_USDT
             self.pnl_total = 0
 
+    def load_klines_initial(self, limit=128):
+        resp = api.fetch_klines(self.pair, INTERVAL, limit=limit)
+        self.df = resp_to_df(resp)
+
+    def load_klines_incremental(self, safety=2):
+        if self.df is None or len(self.df) == 0:
+            self.load_klines_initial()
+            return
+
+        interval_ms = INTERVALS_TO_SEC[INTERVAL] * 1000
+        last_known = int(self.df["time"].iloc[-1])
+        start = last_known - safety * interval_ms
+
+        resp = api.fetch_klines(self.pair, INTERVAL, limit=200, start=start)
+        df_new = resp_to_df_incremental(resp)
+
+        self.df = (
+            pd.concat([self.df, df_new], ignore_index=True)
+            .drop_duplicates(subset="time", keep="last")
+            .sort_values("time")
+            .reset_index(drop=True)
+        )
+
     def process(self, pos):
         # 1.1. Синхронизация с биржей, подготовка данных
-        print(pos)
-        df = api.fetch_klines(self.pair, INTERVAL)
+        if self.df is None:
+            self.load_klines_initial()
+        else:
+            self.load_klines_incremental()
+        df = self.df
+        print(df)
         if self.position != pos:
             print(f"\n\t\t\t\t\t\t  [{self.pair}] Позиция изменилась на бирже: {self.position} -> {pos}")
             self.position = pos
@@ -172,7 +246,7 @@ class SARTrader:
         self.order_new['side'] = 'Sell' if self.position['side'] == 'LONG' else 'Buy'
         # print(f"self.position['side' ] = {self.position['side']} \t\t self.order_new['side'] = {self.order_new['side']}")
         self.calculate_price(df)
-        self.calculate_pnl()
+        # self.calculate_pnl()
         quantity = abs(self.position['positionAmt']) + self.base_usdt / self.order_new['triggerPrice']
         self.order_new['qty'] = self.format_qty(quantity)
         # self.order_new['triggerDirection'] = 1 if self.order_new['triggerPrice'] > df['close'].iloc[-1] else 2
@@ -213,25 +287,43 @@ def process_traders(traders, open_positions):
         try:
             # Трейдер решает, оставлять ли его дальше
             # should_keep = trader.process(df, open_positions)
+
             trader.process(open_positions.get(pair))
         except Exception as e:
             print(f"  Ошибка {pair}: {e}")
 
 
+def parse_positions(resp):
+    out = {}
+    for pos in resp["result"]["list"]:
+        if float(pos["size"]) != 0:
+            out[pos["symbol"]] = {
+                "side": "LONG" if pos["side"] == "Buy" else "SHORT",
+                "entry_price": float(pos["avgPrice"]),
+                "positionAmt": float(pos["size"]),
+            }
+    return out
+
+
 def tick(traders, restrictions):
     """Один проход: синхронизация трейдеров с позициями и обработка каждого."""
-    open_positions = api.get_current_positions()
+    resp = api.get_current_positions()
+    # 1) транспорт упал — пропускаем тик, НЕ трогаем трейдеров
+    if resp is None or resp.get("retCode") != 0:
+        print("  Пропуск тика: нет ответа от биржи")
+        return
+    open_positions = parse_positions(resp)
+
     sync_traders(traders, open_positions, restrictions)
+
     process_traders(traders, open_positions)
 
 
 def build_lot_size_restrictions():
     """Формирует словарь ограничений размера лота: symbol -> {qtyStep, minOrderQty}."""
-    resp = requests.get(
-        "https://api-demo.bybit.com/v5/market/instruments-info",
-        params={"category": "linear", "limit": 1000},
-        timeout=30,
-    ).json()
+    resp = api.instruments_info()
+    if resp is None:
+        return None  # сигнал «не смогли получить»
 
     restrictions = {}
     # pairs = set()
@@ -249,7 +341,12 @@ def build_lot_size_restrictions():
 
 def timer():
     """Таймер"""
-    restrictions = build_lot_size_restrictions()
+    restrictions = None
+    while restrictions is None:
+        restrictions = build_lot_size_restrictions()
+        if restrictions is None:
+            print("  Ждём биржу, повтор через 10 сек...")
+            time.sleep(10)
 
     traders = {}
     tick(traders, restrictions)
@@ -258,9 +355,95 @@ def timer():
     while True:
         now = time.time()
         print(time.ctime(now), '\t след. в: ', time.ctime(now + t - now % t + 1), '\t', now % t)
-        time.sleep(t - now % t + 0.1)
+        time.sleep(t - now % t + 3)
         tick(traders, restrictions)
 
 
 if __name__ == "__main__":
     timer()
+
+"""
+{
+ 'adlRankIndicator': 2,
+ 'autoAddMargin': 0,
+ 'avgPrice': '0.004386',
+ 'breakEvenPrice': '0.00438117',
+ 'bustPrice': '',
+ 'createdTime': '1792311126219',
+ 'cumRealisedPnl': '-110.2144042',
+ 'curRealisedPnl': '-0.12712821',
+ 'isReduceOnly': False,
+ 'leverage': '10',
+ 'leverageSysUpdatedTime': '',
+ 'liqPrice': '0.00552364',
+ 'liqPriceByMp': '',
+ 'markPrice': '0.0044005',
+ 'mmrSysUpdatedTime': '',
+ 'netDeltaRatio': '',
+ 'openTime': 1792689074250,
+ 'positionBalance': '0',
+ 'positionIM': '23.33047603',
+ 'positionIMByMp': '23.33047603',
+ 'positionIdx': 0,
+ 'positionMM': '2.45890453',
+ 'positionMMByMp': '2.45890453',
+ 'positionStatus': 'Normal',
+ 'positionValue': '231.90635',
+ 'riskId': 1,
+ 'riskLimitValue': '200000',
+ 'seq': 140679343654577,
+ 'sessionAvgPrice': '',
+ 'side': 'Sell',
+ 'size': '52700',
+ 'stopLoss': '',
+ 'symbol': '1000PEPEUSDT',
+ 'takeProfit': '',
+ 'tpslMode': 'Full',
+ 'tradeMode': 0,
+ 'trailingStop': '0',
+ 'unrealisedPnl': '-0.76415',
+ 'updatedTime': '1792689074250'
+ }
+"""
+"""
+Поле	Значение (кратко)
+adlRankIndicator	Ранг риска авто-делевериджа (ADL): чем выше, тем вероятнее принудительное сокращение позиции 
+autoAddMargin	Авто-добавление маржи в изолированном режиме (0 = выкл) 
+avgPrice	Средняя цена входа в позицию 
+breakEvenPrice	Цена безубыточности (с учётом комиссий) 
+bustPrice	Цена банкротства (когда потеряна вся маржа); пусто = не применимо 
+createdTime	Время создания записи позиции (мс)
+cumRealisedPnl	Накопленный реализованный PnL за всё время по символу 
+curRealisedPnl	Реализованный PnL текущего удержания (с последнего изменения размера) 
+isReduceOnly	Флаг «только уменьшение» (при понижении лимита риска биржей) 
+leverage	Текущее плечо позиции 
+leverageSysUpdatedTime	Время последнего системного изменения плеча (пусто = не менялось)
+liqPrice	Цена ликвидации (для кросс-маржи — расчётная) 
+liqPriceByMp	Цена ликвидации, рассчитанная по mark price (служебное)
+markPrice	Текущая mark price (цена для расчёта PnL/ликвидации) 
+mmrSysUpdatedTime	Время системного обновления ставки поддерживающей маржи (пусто = не менялось)
+netDeltaRatio	Коэффициент чистого дельта (для опционов/дельта-нейтрального режима); пусто = режим не включён 
+openTime	Время открытия текущей позиции (мс)
+positionBalance	Баланс позиции (для изолированной маржи; 0 = не применимо/пусто)
+positionIM	Начальная маржа (Initial Margin), требуемая для удержания позиции 
+positionIMByMp	То же, но рассчитано по mark price (обычно совпадает) 
+positionIdx	Идентификатор позиции: 0 = one-way mode 
+positionMM	Поддерживающая маржа (Maintenance Margin), минимум для удержания 
+positionMMByMp	То же, но по mark price (обычно совпадает) 
+positionStatus	Статус: Normal / Liq (ликвидация) / Adl (авто-делеверидж) 
+positionValue	Стоимость позиции (size × markPrice) 
+riskId	ID уровня риска (тира лимитов) 
+riskLimitValue	Значение лимита риска для текущего тира 
+seq	Порядковый номер обновления позиции (для отслеживания актуальности)
+sessionAvgPrice	Средняя цена сессии (для USDC-контрактов; пусто = не применимо) 
+side	Направление: Buy = лонг, Sell = шорт 
+size	Размер позиции (всегда положительный) 
+stopLoss	Цена стоп-лосса (пусто = не установлен)
+symbol	Торговая пара
+takeProfit	Цена тейк-профита (пусто = не установлен)
+tpslMode	Режим TP/SL: Full (на всю позицию) / Partial
+tradeMode	Режим маржи: 0 = кросс, 1 = изолированная 
+trailingStop	Дистанция трейлинг-стопа (0 = не установлен)
+unrealisedPnl	Нереализованный PnL (плавающая прибыль/убыток) 
+updatedTime	Время последнего обновления позиции (мс)
+"""

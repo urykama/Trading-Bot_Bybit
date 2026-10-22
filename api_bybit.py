@@ -144,33 +144,71 @@ class api_bybit:
         ).json()
 
     def get_current_positions(self):
-        """Получает открытые позиции с биржи (Bybit V5)"""
-        positions = {}
-
+        """
+        Возвращает сырой ответ Bybit V5 (/v5/position/list) как dict,
+        либо None при сетевой/парсинговой ошибке.
+        Разбор (retCode, result["list"], size != 0) — на стороне вызывающего.
+        """
         query = "category=linear&settleCoin=USDT"
+        try:
+            resp = requests.get(
+                self.base_url + "/v5/position/list?" + query,
+                headers=self.signed_headers(query),
+                timeout=10,
+            ).json()
+        except (requests.RequestException, ValueError) as e:
+            print(f"  ✗ get_current_positions: {e}")
+            return None
+        return resp
 
-        resp = requests.get(
-            self.base_url + "/v5/position/list?" + query,
-            headers=self.signed_headers(query),
-            timeout=10,
-        ).json()
+    def instruments_info(self):
+        try:
+            resp = requests.get(
+                "https://api-demo.bybit.com/v5/market/instruments-info",
+                params={"category": "linear", "limit": 1000},
+                timeout=30,
+            ).json()
+        except (requests.RequestException, ValueError) as e:  # ValueError покрывает JSONDecodeError
+            print(f"  ✗ instruments_info: {e}")
+            return None
 
         if resp.get("retCode") != 0:
-            print(f"Ошибка позиций: {resp.get('retMsg')}")
-            return {}
+            print(resp)
+            return None
 
-        for pos in resp["result"]["list"]:
-            if float(pos["size"]) != 0:
-                positions[pos["symbol"]] = {
-                    "side": "LONG" if pos["side"] == "Buy" else "SHORT",
-                    "entry_price": float(pos["avgPrice"]),
-                    "positionAmt": float(pos["size"]),
-                }
+        return resp
 
-        return positions
+    def fetch_klines(self, pair, interval, limit=128, start=None, end=None):
+        params = {
+            "category": "linear",
+            "symbol": pair,
+            "interval": INTERVAL_MAP[interval],
+            "limit": limit,
+        }
+        if start is not None:
+            params["start"] = int(start)
+        if end is not None:
+            params["end"] = int(end)
 
+        # try:
+        resp = requests.get(
+            self.base_url + "/v5/market/kline",
+            params=params,
+            timeout=10,
+        ).json()
+        # except (requests.RequestException, ValueError) as e:
+        #     print(f"  ✗ fetch_klines: {e}")
+        #     return None
+        #
+        # if resp.get("retCode") != 0:
+        #     print(f"  ✗ fetch_klines retCode={resp.get('retCode')}: {resp.get('retMsg')}")
+        #     return None
+
+        return resp
+
+    """
     def fetch_klines(self, pair, interval, limit=128):
-        """Загружает свечи с биржи"""
+
         # print(f"'interval' : {INTERVAL_MAP[interval]}, 'limit': {limit}")
         resp = requests.get(
             self.base_url + "/v5/market/kline",
@@ -180,14 +218,14 @@ class api_bybit:
 
         raw = resp["result"]["list"]  # [[start, open, high, low, close, volume, turnover], ...]
         df = pd.DataFrame(raw, columns=["time", "open", "high", "low", "close", "volume", "turnover"]).astype(float)
-
+        # Удаляем колонку "turnover"
+        df = df.drop(columns=["turnover"])
         if df['time'].iloc[0] > df['time'].iloc[-1]:
             #     # Обратный порядок — разворачиваем
             df = df.iloc[::-1].reset_index(drop=True)
 
-        df["timestamp"] = pd.to_datetime(df["time"], unit="ms")
-
         return df
+    """
 
 
 if __name__ == "__main__":

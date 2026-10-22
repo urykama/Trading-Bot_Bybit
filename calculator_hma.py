@@ -73,7 +73,8 @@ def calculate_hma(df, period=16):
     Иначе первые значения (и, возможно, весь ряд) будут NaN.
     """
 
-    df_hma = df.iloc[-33:-1]  # 32 строки, последняя отброшена
+    # df_hma = df.iloc[-33:-1]  # 32 строки, последняя отброшена
+    df_hma = df.iloc[-33:]  # 32 строки, последняя отброшена
     if period < 2:
         raise ValueError(f"period must be >= 2, got {period}")
 
