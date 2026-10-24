@@ -39,6 +39,37 @@ class api_bybit:
             "Content-Type": "application/json",
         }
 
+    def place_limit_order(self, pair, side, quantity, price, reduce_only=True, time_in_force="GTC", position_idx=0):
+        """
+        Лимитный ордер на Bybit V5.
+        Возвращает сырой resp (dict) как есть.
+        """
+        body = {
+            "category": "linear",
+            "symbol": pair,
+            "side": side,  # "Buy" / "Sell"
+            "orderType": "Limit",
+            "qty": str(quantity),
+            "price": str(price),
+            "positionIdx": position_idx,  # 0 — One-Way Mode
+            "reduceOnly": reduce_only,
+            "timeInForce": time_in_force,  # GTC / IOC / FOK / PostOnly
+        }
+        payload = json.dumps(body)
+
+        try:
+            resp = requests.post(
+                self.base_url + "/v5/order/create",
+                headers=self.signed_headers(payload),
+                data=payload,
+                timeout=10,
+            ).json()
+        except (requests.RequestException, ValueError) as e:
+            print(f"  ✗ Ошибка place_limit_order: {e}")
+            return None
+
+        return resp
+
     def place_market_order(self, pair, side, quantity, reduce_only=True):
         """
         Маркет-ордер на Bybit V5.
