@@ -1,4 +1,4 @@
-# sar_bot.py
+# sar_bot_classic_with_ep.py
 
 import time
 import requests
@@ -9,15 +9,24 @@ import pandas as pd
 from calculator_sar import calculate_sar
 from calculator_hma import calculate_hma
 
-from api_bybit import api_bybit
+from api_bybit import ApiBybit
 
 # ========== НАСТРОЙКИ ==========
+
+
+mode_sandbox = True  # 
+mode_sandbox = False
+if mode_sandbox != True:
+    api = ApiBybit()
+else:
+    api = ApiBybit(base_url = "http://127.0.0.1:8000")
+
+
 pd.set_option('display.max_columns', None)
 pd.set_option('display.width', 1000)
 BASE_USDT = 200  # Базовый размер позиции в USDT
 # INTERVAL = '1m'  # Таймфрейм по умолчанию
-INTERVAL = '1m'  # Таймфрейм по умолчанию
-# INTERVAL = '1h'  # Таймфрейм по умолчанию
+INTERVAL = '1h'  # Таймфрейм по умолчанию
 INTERVALS_TO_SEC = {
     '1m': 60, '3m': 180, '5m': 300, '15m': 900, '30m': 1800,
     '1h': 3600, '2h': 7200, '4h': 14400, '1d': 86400,
@@ -35,7 +44,6 @@ STEPS = {
     "0.00001": 5,
 }
 
-api = api_bybit()
 
 
 def fetch_klines(pair, interval=INTERVAL, limit=128):
@@ -83,7 +91,7 @@ class SARTrader:
             'qty': None,
             'order_id': None,
         }
-        print(f"  Трейдер создан для {pair}: шаг количества {qty_step}, минимальный размер ордера {min_order_qty}")
+        # print(f"  Трейдер создан для {pair}: шаг количества {qty_step}, минимальный размер ордера {min_order_qty}")
 
     def place_trigger(self):
 
@@ -132,25 +140,37 @@ class SARTrader:
 
         df = fetch_klines(self.pair, interval=INTERVAL, limit=128)
         df = calculate_sar(df)
-        # print(df)
-        if self.position != pos:
-            # if self.position['side'] != pos['side']:
-            print(f"\n\t\t\t\t\t\t  [{self.pair}] Позиция изменилась на бирже: {self.position} -> {pos}")
-            self.position = pos
+        """
+        # Проверка разворота позиции -> удаление ордеров, установка лимиток
+        if self.position is None or self.position['side'] != pos['side']:
+            print(f"\n[{self.pair}] Разворот позиции на бирже: {self.position}")
+            print(f"                                    -> {pos}")
+
             self.order_cur['side'] = None
             api.cancel_all_orders(self.pair)
 
             sar_ep = df['ep'].iloc[-1 - abs(df['trend'].iloc[-1])]
             price_delta = abs(pos['entry_price'] - sar_ep)
             tp1_price = pos['entry_price'] + (price_delta if pos['side'] == 'LONG' else -price_delta)
-            print(pos['side'], pos['entry_price'], df['ep'], df['trend'], '\t sar_ep = ', sar_ep)
+            tp2_price = pos['entry_price'] + (2 * price_delta if pos['side'] == 'LONG' else -2 * price_delta)
+            # print(pos['side'], pos['entry_price'], df['ep'], df['trend'], '\t sar_ep = ', sar_ep)
             resp = api.place_limit_order(
                 self.pair,
                 'Sell' if pos['side'] == 'LONG' else 'Buy',
                 self.format_qty(pos['positionAmt'] * 0.5),
                 tp1_price)
-            if resp and resp.get("retCode") == 0:
-                order_id = resp["result"]["orderId"]
+            resp = api.place_limit_order(
+                self.pair,
+                'Sell' if pos['side'] == 'LONG' else 'Buy',
+                self.format_qty(pos['positionAmt'] * 0.25),
+                tp2_price)
+        """
+        # Проверка разворота позиции
+        if self.position is None or self.position != pos:
+            # if self.position['side'] != pos['side']:
+            print(f"\n[{self.pair}] Изменение позиции на бирже: {self.position}")
+            print(f"                                    -> {pos}")
+            self.position = pos
 
         # df = self.prepare(df)  # вычисление calculate_sar
         # Принятие решения (поиск цены для триггера)
@@ -159,8 +179,11 @@ class SARTrader:
         # print(f"self.position['side' ] = {self.position['side']} \t\t self.order_new['side'] = {self.order_new['side']}")
         self.calculate_price(df)
         # self.calculate_pnl()
-        quantity = abs(self.position['positionAmt']) + self.base_usdt / self.order_new['triggerPrice']
+        # quantity = abs(self.position['positionAmt']) + self.base_usdt / self.order_new['triggerPrice']
+        quantity = abs(self.position['positionAmt']) + 0.01
+        print(self.position['positionAmt'], self.base_usdt / self.order_new['triggerPrice'], self.format_qty(quantity))
         self.order_new['qty'] = self.format_qty(quantity)
+        # self.order_new['qty'] = '0.02'
         # self.order_new['triggerDirection'] = 1 if self.order_new['triggerPrice'] > df['close'].iloc[-1] else 2
         self.order_new['triggerDirection'] = 2 if self.position['side'] == 'LONG' else 1
 
@@ -265,9 +288,10 @@ def timer():
 
     t = INTERVALS_TO_SEC[INTERVAL]
     while True:
-        now = time.time()
-        print(time.ctime(now), '\t след. в: ', time.ctime(now + t - now % t + 1), '\t', now % t)
-        time.sleep(t - now % t + 3)
+        if mode_sandbox != True:
+            now = time.time()
+            print(time.ctime(now), '\t след. в: ', time.ctime(now + t - now % t + 1), '\t', now % t)
+            time.sleep(t - now % t + 3)
         tick(traders, restrictions)
 
 
