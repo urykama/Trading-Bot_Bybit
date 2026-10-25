@@ -10,21 +10,19 @@ import pandas as pd
 API_KEY = "lUMI4W5C40tmOFY0DS"
 SECRET_KEY = "1bLR5sLZlAMZN968ISdr0fJWb0Smw4sMPzjU"
 RECV_WINDOW = "5000"
-BASE_URL = "https://api-demo.bybit.com"
-#
-# BASE_URL = "http://127.0.0.1:8000"
+
 INTERVAL_MAP = {
     '1m': '1', '3m': '3', '5m': '5', '15m': '15', '30m': '30',
     '1h': '60', '2h': '120', '4h': '240', '1d': 'D',
 }
 
 
-class api_bybit:
-    def __init__(self):
+class ApiBybit:
+    def __init__(self, base_url = "https://api-demo.bybit.com"):
         self.api_key = API_KEY
         self.secret_key = SECRET_KEY
         self.recv_window = RECV_WINDOW
-        self.base_url = BASE_URL
+        self.base_url = base_url
 
     def signed_headers(self, payload, timestamp=None):
         ts = timestamp or str(int(time.time() * 1000))
@@ -131,7 +129,7 @@ class api_bybit:
             if resp.get("retCode") == 0:
                 order_id = resp["result"]["orderId"]
                 # print(f"  ✓ Триггер: {pair} \t{side} \t {quantity} @ {trigger_price:.6f}, ID={order_id}")
-                print(f"  ✓ resp['result'] : {resp}")
+                # print(f"  ✓ resp['result'] : {resp}")
                 return order_id
             else:
                 print(f"  ✗ Ошибка: {resp}")
@@ -145,7 +143,7 @@ class api_bybit:
         Отменяет ордер по orderId (Bybit V5).
         Возвращает resp (dict) или None при исключении.
         """
-        print(f"Delete order with ID {order['order_id']}")
+        # print(f"Delete order with ID {order['order_id']}")
         body = {
             "category": "linear",
             "symbol": order['symbol'],
