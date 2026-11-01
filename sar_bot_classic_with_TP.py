@@ -19,14 +19,14 @@ mode_sandbox = False
 if mode_sandbox != True:
     api = ApiBybit()
 else:
-    api = ApiBybit(base_url = "http://127.0.0.1:8000")
-
+    api = ApiBybit(base_url="http://127.0.0.1:8000")
 
 pd.set_option('display.max_columns', None)
 pd.set_option('display.width', 1000)
 BASE_USDT = 200  # Базовый размер позиции в USDT
+RISK = 5
 # INTERVAL = '1m'  # Таймфрейм по умолчанию
-INTERVAL = '1h'  # Таймфрейм по умолчанию
+INTERVAL = '5m'  # Таймфрейм по умолчанию
 INTERVALS_TO_SEC = {
     '1m': 60, '3m': 180, '5m': 300, '15m': 900, '30m': 1800,
     '1h': 3600, '2h': 7200, '4h': 14400, '1d': 86400,
@@ -43,7 +43,6 @@ STEPS = {
     "0.0001": 4,
     "0.00001": 5,
 }
-
 
 
 def fetch_klines(pair, interval=INTERVAL, limit=128):
@@ -126,6 +125,7 @@ class SARTrader:
         if (self.position['side'] == 'SHORT' and best_price < df['close'].iloc[-1]) or (
                 self.position['side'] == 'LONG' and best_price > df['close'].iloc[-1]):
             best_price = df['sar_prev'].iloc[-1]
+        # if self.price_medium != 0:
 
         self.order_new['triggerPrice'] = best_price
         return
@@ -140,12 +140,18 @@ class SARTrader:
 
         df = fetch_klines(self.pair, interval=INTERVAL, limit=128)
         df = calculate_sar(df)
-        """
+
         # Проверка разворота позиции -> удаление ордеров, установка лимиток
         if self.position is None or self.position['side'] != pos['side']:
             print(f"\n[{self.pair}] Разворот позиции на бирже: {self.position}")
             print(f"                                    -> {pos}")
-
+            self.price_medium = 0
+            if self.position is not None:
+                self.last_delta = self.position['entry_price'] - pos['entry_price']
+                if self.position['side'] == 'LONG':
+                    self.last_delta *= -1
+                    if self.last_delta < 0:
+                        self.price_medium = (self.position['entry_price'] - pos['entry_price']) / 2
             self.order_cur['side'] = None
             api.cancel_all_orders(self.pair)
 
@@ -164,7 +170,7 @@ class SARTrader:
                 'Sell' if pos['side'] == 'LONG' else 'Buy',
                 self.format_qty(pos['positionAmt'] * 0.25),
                 tp2_price)
-        """
+
         # Проверка разворота позиции
         if self.position is None or self.position != pos:
             # if self.position['side'] != pos['side']:
@@ -178,9 +184,14 @@ class SARTrader:
         self.order_new['side'] = 'Sell' if self.position['side'] == 'LONG' else 'Buy'
         # print(f"self.position['side' ] = {self.position['side']} \t\t self.order_new['side'] = {self.order_new['side']}")
         self.calculate_price(df)
-        # self.calculate_pnl()
+        # добавить размер позиции от риска: q_usdt = BASE_USDT / max((triggerPrice - ep), 1)
+
+        # long = 1000, stop = 950 -> 1000 * 200 - 950 * 200 = 10000  # 200 - qty
+        # long = 1000, stop = 950 -> 1000 / (1000 - 950) * 200 = 10000
+        # long = 1000, stop = 950 -> 200 / (1000 - 950) = 4 qty
+
         # quantity = abs(self.position['positionAmt']) + self.base_usdt / self.order_new['triggerPrice']
-        quantity = abs(self.position['positionAmt']) + 0.01
+        quantity = abs(self.position['positionAmt']) + RISK / abs(self.order_new['triggerPrice'] - df['ep'].iloc[-1])
         print(self.position['positionAmt'], self.base_usdt / self.order_new['triggerPrice'], self.format_qty(quantity))
         self.order_new['qty'] = self.format_qty(quantity)
         # self.order_new['qty'] = '0.02'

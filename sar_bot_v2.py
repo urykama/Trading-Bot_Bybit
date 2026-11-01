@@ -13,8 +13,6 @@ from sar_strategy import (
     get_reversal_info,
 )
 
-
-
 # ========== НАСТРОЙКИ ==========
 BASE_USDT = 1000  # Базовый размер позиции в USDT
 INTERVAL = '1h'  # Таймфрейм по умолчанию
@@ -28,9 +26,9 @@ INTERVAL_MAP = {
 }
 
 STEPS = {
-    "1":     0,
-    "0.1":   1,
-    "0.01":  2,
+    "1": 0,
+    "0.1": 1,
+    "0.01": 2,
     "0.001": 3,
     "0.0001": 4,
     "0.00001": 5,
@@ -40,7 +38,7 @@ STEPS = {
 }
 
 API_KEY = "lUMI4W5C40tmOFY0DS"
-SECRET_KEY = "1bLR5sLZlAMZN968ISdr0fJWb0Smw4sMPzjU"        # <-- замени
+SECRET_KEY = "1bLR5sLZlAMZN968ISdr0fJWb0Smw4sMPzjU"  # <-- замени
 RECV_WINDOW = "5000"
 # BASE_URL = "https://api-demo.bybit.com"
 BASE_URL = "http://127.0.0.1:8000"
@@ -63,6 +61,7 @@ def _signed_headers(payload: str) -> dict:
         "X-BAPI-RECV-WINDOW": RECV_WINDOW,
         "Content-Type": "application/json",
     }
+
 
 def signed_headers(api_key, secret_key, recv_window, payload, timestamp=None):
     ts = timestamp or str(int(time.time() * 1000))
@@ -88,13 +87,13 @@ def set_trigger_order(pair, side, trigger_price, quantity):
         body = {
             "category": "linear",
             "symbol": pair,
-            "side": side,                        # "Buy" / "Sell"
+            "side": side,  # "Buy" / "Sell"
             "orderType": "Market",
             "qty": str(quantity),
             "triggerPrice": str(trigger_price),
             "triggerBy": "MarkPrice",
             "triggerDirection": 1 if side == "Buy" else 2,
-            "positionIdx": 0,                    # One-Way Mode
+            "positionIdx": 0,  # One-Way Mode
             "timeInForce": "GTC",
         }
         payload = json.dumps(body)
@@ -117,6 +116,7 @@ def set_trigger_order(pair, side, trigger_price, quantity):
         print(f"  ✗ Ошибка: {e}")
         return None
 
+
 def cancel_all_orders(pair):
     """Отменяет все ордера по паре (Bybit V5)."""
     body = {"category": "linear", "symbol": pair}
@@ -127,6 +127,7 @@ def cancel_all_orders(pair):
         data=payload,
         timeout=10,
     ).json()
+
 
 # ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
 def get_current_positions():
@@ -142,7 +143,7 @@ def get_current_positions():
             api_key=API_KEY,
             secret_key=SECRET_KEY,
             recv_window=RECV_WINDOW,
-            payload=query,          # подпись от query-строки
+            payload=query,  # подпись от query-строки
         ),
         timeout=10,
     ).json()
@@ -370,6 +371,7 @@ class SARTrader:
 
         return True
 
+
 # ========== ОСНОВНОЙ ЦИКЛ ==========
 def run(traders, filters):
     """Основной цикл"""
@@ -394,14 +396,14 @@ def run(traders, filters):
                 pos_data['side'],
                 pos_data['entry_price'],
                 pos_data['positionAmt'],
-                filters,                    # <-- 5-й аргумент
+                filters,  # <-- 5-й аргумент
                 BASE_USDT
             )
 
     # Обрабатываем каждого трейдера
     for pair, trader in list(traders.items()):
         try:
-            df = fetch_klines( pair)
+            df = fetch_klines(pair)
             if df is None:
                 continue
             should_keep = trader.process(df, open_positions)
@@ -442,5 +444,8 @@ def timer():
         # time.sleep(t - now % t + 0.1)
         run(traders, filters)
 
+
 if __name__ == "__main__":
     timer()
+
+#
