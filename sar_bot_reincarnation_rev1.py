@@ -23,9 +23,9 @@ else:
 
 pd.set_option('display.max_columns', None)
 pd.set_option('display.width', 1000)
-BASE_USDT = 200  # Базовый размер позиции в USDT
+BASE_USDT = 1000  # Базовый размер позиции в USDT
 # INTERVAL = '1m'  # Таймфрейм по умолчанию
-INTERVAL = '1h'  # Таймфрейм по умолчанию
+INTERVAL = '1m'  # Таймфрейм по умолчанию
 INTERVALS_TO_SEC = {
     '1m': 60, '3m': 180, '5m': 300, '15m': 900, '30m': 1800,
     '1h': 3600, '2h': 7200, '4h': 14400, '1d': 86400,
@@ -122,7 +122,7 @@ class SARTrader:
         if dist_own == 0:
             self.order_new['triggerPrice'] = df['sar'].iloc[idx]
         else:
-            if abs(df['sar'].iloc[idx] - df['sar_prev'].iloc[idx]) / dist_own < 1:
+            if abs(df['sar'].iloc[idx] - df['sar_prev'].iloc[idx]) / dist_own < 10000:
                 self.order_new['triggerPrice'] = df['sar'].iloc[idx]
             else:
                 self.order_new['triggerPrice'] = df['sar_trend_start'].iloc[idx]
@@ -155,12 +155,11 @@ class SARTrader:
             delta_price = self.position['entry_price'] - self.order_new['triggerPrice']
             # print(f"{delta_price} = {self.position['entry_price']} - {self.order_new['triggerPrice']}")
         self.pnl_expected = delta_price * self.position['positionAmt']
-        self.pnl_total += self.pnl_expected
-        print(f"self.pnl_expected = {self.pnl_expected} \t self.pnl_total = {self.pnl_total}")
-        self.base_usdt = BASE_USDT - self.pnl_total * 2
-        if self.base_usdt < BASE_USDT:
-            self.base_usdt = BASE_USDT
-            self.pnl_total = 0
+        # self.pnl_total += self.pnl_expected
+        # self.base_usdt = BASE_USDT - self.pnl_total * 2
+        # if self.base_usdt < BASE_USDT:
+        #     self.base_usdt = BASE_USDT
+        #     self.pnl_total = 0
 
     def process(self, pos):
         # 1.1. Синхронизация с биржей, подготовка данных
@@ -168,12 +167,18 @@ class SARTrader:
         df = fetch_klines(self.pair, interval=INTERVAL, limit=128)
         df = calculate_sar(df)
 
+        if self.position is None or (self.position != pos and self.position['side'] != pos['side']):
+            self.pos_rev = True
         # Проверка разворота позиции
         if self.position is None or self.position != pos:
-            # if self.position['side'] != pos['side']:
             print(f"\n[{self.pair}] Изменение позиции на бирже: {self.position}")
             print(f"                                    -> {pos}")
             self.position = pos
+            api.cancel_all_orders(self.pair)
+            # self.pnl_total += self.pnl_expected
+            # if self.pnl_total < 0:
+            #     self.pnl_total = 0
+            # self.base_usdt += self.pnl_expected
 
         # df = self.prepare(df)  # вычисление calculate_sar
         # Принятие решения (поиск цены для триггера)
@@ -184,17 +189,36 @@ class SARTrader:
 
         self.calculate_pnl()
 
-        quantity = abs(self.position['positionAmt']) + self.base_usdt / self.order_new['triggerPrice']
+        # quantity = abs(self.position['positionAmt']) + self.base_usdt / self.order_new['triggerPrice']
+        quantity = abs(self.position['positionAmt']) + (self.base_usdt + self.pnl_total * 30) / self.order_new[
+            'triggerPrice'] * 0.1
         # quantity = abs(self.position['positionAmt']) + 0.05
         # print(self.position['positionAmt'], self.base_usdt / self.order_new['triggerPrice'], self.format_qty(quantity))
         self.order_new['qty'] = self.format_qty(quantity)
         # self.order_new['qty'] = '0.02'
-        # self.order_new['triggerDirection'] = 1 if self.order_new['triggerPrice'] > df['close'].iloc[-1] else 2
-        self.order_new['triggerDirection'] = 2 if self.position['side'] == 'LONG' else 1
+        self.order_new['triggerDirection'] = 1 if self.order_new['triggerPrice'] > df['close'].iloc[-1] else 2
+        # self.order_new['triggerDirection'] = 2 if self.position['side'] == 'LONG' else 1
 
         # Исполнение (вычисление количества)
         # self.execute()
         self.place_trigger()
+        if self.pos_rev:
+            self.delta_ep = abs(df['ep'].iloc[-1 - abs(df['trend'].iloc[-1])] - df['ep'].iloc[-1])
+            print(
+                f" {df['ep'].iloc[-1 - abs(df['trend'].iloc[-1])]}  {df['ep'].iloc[-1]} {self.delta_ep}")
+            print(self.position)
+            print(api.place_limit_order(self.pair,
+                                        'Sell',
+                                        self.position['positionAmt'],
+                                        self.position['entry_price'] + self.delta_ep,
+                                        reduce_only=False))
+
+            print(api.place_limit_order(self.pair,
+                                        'Buy',
+                                        self.position['positionAmt'],
+                                        self.position['entry_price'] - self.delta_ep,
+                                        reduce_only=False))
+            self.pos_rev = False
 
 
 # ========== ОСНОВНОЙ ЦИКЛ ==========

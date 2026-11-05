@@ -15,7 +15,7 @@ from api_bybit import ApiBybit
 
 
 mode_sandbox = True  # 
-mode_sandbox = False
+# mode_sandbox = False
 if mode_sandbox != True:
     api = ApiBybit()
 else:

@@ -1,4 +1,4 @@
-# sar_bot_classic_with_ep.py
+# sar_bot_reincarnation.py
 
 import time
 import requests
@@ -19,8 +19,7 @@ mode_sandbox = True  #
 if mode_sandbox != True:
     api = ApiBybit()
 else:
-    api = ApiBybit(base_url = "http://127.0.0.1:8000")
-
+    api = ApiBybit(base_url="http://127.0.0.1:8000")
 
 pd.set_option('display.max_columns', None)
 pd.set_option('display.width', 1000)
@@ -43,7 +42,6 @@ STEPS = {
     "0.0001": 4,
     "0.00001": 5,
 }
-
 
 
 def fetch_klines(pair, interval=INTERVAL, limit=128):
@@ -117,17 +115,17 @@ class SARTrader:
         #     f"df['sar'].iloc[-1 - abs(df['trend'].iloc[-1])]] = {df['sar_before_touch'].iloc[- abs(df['trend'].iloc[-1])]}")
         idx = -1
         if (self.order_new['side'] == 'Buy' and df['trend'].iloc[-1] > 0) or (
-            self.order_new['side'] == 'Sell' and df['trend'].iloc[-1] < 0):
+                self.order_new['side'] == 'Sell' and df['trend'].iloc[-1] < 0):
             idx -= abs(df['trend'].iloc[-1])
 
         dist_own = abs(df['sar'].iloc[idx] - df['sar_trend_start'].iloc[idx])
         if dist_own == 0:
-            best_price = df['sar'].iloc[idx]
+            self.order_new['triggerPrice'] = df['sar'].iloc[idx]
         else:
             if abs(df['sar'].iloc[idx] - df['sar_prev'].iloc[idx]) / dist_own < 1:
-                best_price = df['sar'].iloc[idx]
+                self.order_new['triggerPrice'] = df['sar'].iloc[idx]
             else:
-                best_price = df['sar_trend_start'].iloc[idx]
+                self.order_new['triggerPrice'] = df['sar_trend_start'].iloc[idx]
 
         # dist_prev = abs(df['sar'].iloc[-1] - df['sar_prev'].iloc[-1])
         # use_start = dist_own < dist_prev
@@ -139,7 +137,7 @@ class SARTrader:
         #         self.position['side'] == 'LONG' and best_price > df['close'].iloc[-1]):
         #     best_price = df['sar_prev'].iloc[-1]
 
-        self.order_new['triggerPrice'] = best_price
+        # self.order_new['triggerPrice'] = best_price
         return
 
     def format_qty(self, quantity):
@@ -167,9 +165,9 @@ class SARTrader:
         # print(f"self.position['side' ] = {self.position['side']} \t\t self.order_new['side'] = {self.order_new['side']}")
         self.calculate_price(df)
         # self.calculate_pnl()
-        # quantity = abs(self.position['positionAmt']) + self.base_usdt / self.order_new['triggerPrice']
-        quantity = abs(self.position['positionAmt']) + 0.01
-        print(self.position['positionAmt'], self.base_usdt / self.order_new['triggerPrice'], self.format_qty(quantity))
+        quantity = abs(self.position['positionAmt']) + self.base_usdt / self.order_new['triggerPrice']
+        # quantity = abs(self.position['positionAmt']) + 0.05
+        # print(self.position['positionAmt'], self.base_usdt / self.order_new['triggerPrice'], self.format_qty(quantity))
         self.order_new['qty'] = self.format_qty(quantity)
         # self.order_new['qty'] = '0.02'
         # self.order_new['triggerDirection'] = 1 if self.order_new['triggerPrice'] > df['close'].iloc[-1] else 2
